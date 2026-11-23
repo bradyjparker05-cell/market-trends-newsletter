@@ -43,7 +43,7 @@ def _gauge_bar(score):
     """
 
 
-def _analyst_consensus_html(consensus):
+def _analyst_consensus_html(consensus, price_target=None):
     if not consensus:
         return ""
     total = (consensus["strong_buy"] + consensus["buy"] + consensus["hold"]
@@ -51,13 +51,18 @@ def _analyst_consensus_html(consensus):
     if total == 0:
         return ""
     buy_total = consensus["strong_buy"] + consensus["buy"]
+    age = consensus.get("age_days")
+    stale_note = " — older ratings" if age is not None and age > 45 else ""
+    target_note = ""
+    if price_target:
+        target_note = f' · avg target <strong style="color:{NAVY};">${price_target["mean"]:,.2f}</strong>'
     return (
         f'<div style="font-size:11px;color:{GRAY};margin-top:4px;">'
-        f'Wall Street ({consensus.get("period","")}): '
+        f'Wall Street ({consensus.get("period","")}{stale_note}): '
         f'<strong style="color:{NAVY};">{buy_total} Buy</strong> · '
         f'{consensus["hold"]} Hold · '
         f'{consensus["sell"] + consensus["strong_sell"]} Sell '
-        f'({total} analysts)</div>'
+        f'({total} analysts){target_note}</div>'
     )
 
 
@@ -93,16 +98,18 @@ def _stock_row(ticker, info, section_label=None):
 
     news_html = ""
     for item in info.get("news", [])[:2]:
-        news_html += f'<div style="font-size:12px;margin-top:4px;"><a href="{item["link"]}" style="color:{NAVY};text-decoration:none;">&#8226; {item["title"]}</a></div>'
+        news_html += f'<div style="font-size:12px;margin-top:4px;"><a href="{item["link"]}" style="color:{NAVY};text-decoration:none;">&#8226; {item["title"]}</a> <span style="color:{GRAY};font-size:10px;">({item.get("published","")})</span></div>'
 
-    consensus_html = _analyst_consensus_html(info.get("analyst_consensus"))
+    consensus_html = _analyst_consensus_html(info.get("analyst_consensus"), info.get("price_target"))
+    as_of = info.get("as_of")
+    as_of_html = f'<br><span style="font-size:10px;color:{GRAY};">prices as of {as_of}</span>' if as_of else ""
     congress_html = _congress_html(info.get("congress"))
 
     return f"""
     <tr style="border-bottom:1px solid #e2e6ea;">
         <td style="padding:12px 8px;">
             <strong>{ticker}</strong>{scan_badge}<br>
-            <span style="font-size:12px;color:{GRAY};">{info['name']}</span>
+            <span style="font-size:12px;color:{GRAY};">{info['name']}</span>{as_of_html}
         </td>
         <td style="padding:12px 8px;text-align:right;">{price}</td>
         <td style="padding:12px 8px;text-align:right;">{pill}</td>
@@ -140,6 +147,8 @@ def build_email(data):
     macro = data["macro"]
     fear_greed = data["fear_greed"]
     reddit = data["reddit"]
+    generated_at = data.get("generated_at")
+    warnings = data.get("warnings") or []
 
     vix = macro.get("vix")
     tnx = macro.get("treasury_10y")
@@ -181,6 +190,21 @@ def build_email(data):
         </tr>
         """
 
+    generated_note = f" · generated {generated_at}" if generated_at else ""
+    warnings_html = ""
+    if warnings:
+        items = "".join(f"<li>{w}</li>" for w in warnings)
+        warnings_html = f"""
+        <tr>
+            <td style="padding:0 28px 8px 28px;">
+                <div style="background:#fff4e5;border-left:4px solid #b8860b;padding:10px 14px;font-size:12px;color:#5a4a1a;">
+                    <strong>Data notes</strong>
+                    <ul style="margin:6px 0 0 16px;padding:0;">{items}</ul>
+                </div>
+            </td>
+        </tr>
+        """
+
     html = f"""
     <html>
     <body style="margin:0;padding:0;background:#eef1f4;font-family:Arial, Helvetica, sans-serif;">
@@ -191,7 +215,7 @@ def build_email(data):
                         <tr>
                             <td style="background:{NAVY};padding:24px 28px;">
                                 <h1 style="color:#ffffff;margin:0;font-size:20px;">Market Report</h1>
-                                <p style="color:#b8c4d1;margin:4px 0 0 0;font-size:13px;">{today}</p>
+                                <p style="color:#b8c4d1;margin:4px 0 0 0;font-size:13px;">{today}{generated_note}</p>
                             </td>
                         </tr>
                         <tr>
@@ -201,10 +225,11 @@ def build_email(data):
                                 <div style="display:flex;gap:16px;margin-top:16px;font-size:13px;color:{GRAY};">
                                     <div>VIX: <strong style="color:{NAVY};">{vix_str}</strong></div>
                                     <div>10Y Treasury: <strong style="color:{NAVY};">{tnx_str}</strong></div>
-                                    <div>Portfolio avg: <strong style="color:{NAVY};">{avg_str}</strong></div>
+                                    <div>Watchlist avg move: <strong style="color:{NAVY};">{avg_str}</strong></div>
                                 </div>
                             </td>
                         </tr>
+                        {warnings_html}
                         <tr>
                             <td style="padding:0 28px 8px 28px;">
                                 <h3 style="margin:0 0 8px 0;font-size:14px;color:{NAVY};">Your Watchlist</h3>
@@ -221,7 +246,7 @@ def build_email(data):
                         </tr>
                         <tr>
                             <td style="background:{CARD};padding:14px 28px;text-align:center;">
-                                <p style="margin:0;font-size:11px;color:{GRAY};">Signals are computed algorithmically from RSI, moving averages, momentum, volume, and public sentiment data — not real analyst opinions. Automated report. Not financial advice.</p>
+                                <p style="margin:0;font-size:11px;color:{GRAY};">Signals are rule-of-thumb scores: technicals (55%), analyst ratings and targets (25%), social sentiment (15%) and Congress trades (5%); inputs with no data are skipped. Confidence reflects how much data was available and how much of it agrees. BUY calls are held back after sharp spikes, when overbought, and for individual stocks trading below their 50-day average. Not real analyst opinions. Automated report. Not financial advice.</p>
                             </td>
                         </tr>
                     </table>
